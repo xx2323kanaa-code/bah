@@ -3,61 +3,46 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>Camera + Duck Overlay (FINAL STABLE)</title>
+<title>Hand Demo – Camera Lock + Frame Control</title>
 
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 
 <style>
 html, body {
-  margin:0; padding:0;
-  width:100%; height:100%;
-  overflow:hidden;
-  background:#000;
+  margin:0; padding:0; width:100%; height:100%;
+  overflow:hidden; background:#000;
 }
 #wrap {
   position:relative;
   width:100vw; height:100vh;
 }
-#video {
-  position:absolute; inset:0;
+#video, #snapshot {
+  position:absolute;
+  inset:0;
   width:100%; height:100%;
   object-fit:cover;
-  z-index:0;
 }
+#snapshot { display:none; }
 #renderCanvas {
-  position:absolute; inset:0;
+  position:absolute;
+  inset:0;
   width:100%; height:100%;
-  background:transparent;
-  z-index:1;
+  pointer-events:none;
 }
-#hud {
+#ui {
   position:fixed;
-  left:10px; right:10px; bottom:10px;
-  display:flex; justify-content:space-between;
-  gap:10px;
-  z-index:5;
+  left:8px; right:8px; bottom:10px;
+  display:flex; gap:10px; justify-content:space-between;
+  z-index:10;
 }
-.btn {
+button {
   padding:10px 14px;
   font-size:14px;
-  color:#fff;
-  background:rgba(0,0,0,0.6);
-  border:1px solid rgba(255,255,255,0.3);
-  border-radius:12px;
-}
-#dbg {
-  position:fixed;
-  left:8px; top:8px; right:8px;
-  max-height:45vh;
-  overflow:auto;
-  display:none;
-  z-index:6;
-  font:12px/1.4 monospace;
-  color:#0f0;
-  background:rgba(0,0,0,0.65);
-  padding:10px;
   border-radius:10px;
+  border:1px solid rgba(255,255,255,0.3);
+  background:rgba(0,0,0,0.6);
+  color:#fff;
 }
 </style>
 </head>
@@ -65,141 +50,105 @@ html, body {
 <body>
 <div id="wrap">
   <video id="video" autoplay muted playsinline></video>
+  <canvas id="snapshot"></canvas>
   <canvas id="renderCanvas"></canvas>
 
-  <div id="dbg"></div>
-
-  <div id="hud">
+  <div id="ui">
     <div>
-      <button class="btn" id="btnCamera">Camera</button>
-      <button class="btn" id="btnPlay">Play</button>
-      <button class="btn" id="btnStop">Stop</button>
+      <button id="btnCamera">Camera</button>
+      <button id="btnLock">LOCK</button>
     </div>
     <div>
-      <button class="btn" id="btnDebug">HUD</button>
-      <button class="btn" id="btnCopy">Copy</button>
+      <button id="btnMini">Mini Open</button>
+      <button id="btnFit">Fit</button>
     </div>
   </div>
 </div>
 
 <script>
-/* ===== CONFIG ===== */
-const GLB_NAME = "Duck1.glb";
+const GLB = "animetesthand2.glb";
 
-/* ===== STATE ===== */
-let engine, scene, camera;
-let animGroups = [];
-let duckLoaded = false;
-let debugOn = false;
-let logs = [];
-let cameraReady = false;
+let engine, scene, cam, anim;
+let cameraOn = false;
+let locked = false;
 
-/* ===== LOG ===== */
-function log(msg){
-  const line = `[${new Date().toISOString()}] ${msg}`;
-  logs.push(line);
-  if (logs.length > 300) logs.shift();
-  if (debugOn) document.getElementById("dbg").textContent = logs.join("\n");
-  console.log(msg);
-}
-
-/* ===== CAMERA (REAL CAMERA) ===== */
+// ================= CAMERA =================
 async function startCamera(){
-  if (cameraReady) return;
+  if(cameraOn) return;
   const video = document.getElementById("video");
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:"environment" }, audio:false
-    });
-    video.srcObject = stream;
-    await video.play();
-    cameraReady = true;
-    log("Camera started");
-  } catch(e){
-    alert("Camera failed");
-  }
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video:{ facingMode:"environment" }, audio:false
+  });
+  video.srcObject = stream;
+  await video.play();
+  cameraOn = true;
 }
 
-/* ===== BABYLON INIT ===== */
-function initBabylon(){
-  if (engine) return;
+// 静止画取得
+function freezeCamera(){
+  const video = document.getElementById("video");
+  const snap = document.getElementById("snapshot");
+  snap.width = video.videoWidth;
+  snap.height = video.videoHeight;
+  const ctx = snap.getContext("2d");
+  ctx.drawImage(video,0,0);
+  snap.style.display = "block";
+  video.style.display = "none";
+}
 
+// ================= BABYLON =================
+async function initBabylon(){
   const canvas = document.getElementById("renderCanvas");
-  engine = new BABYLON.Engine(canvas, true);
+  engine = new BABYLON.Engine(canvas,true);
   scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color4(0,0,0,0);
 
-  camera = new BABYLON.ArcRotateCamera(
+  cam = new BABYLON.ArcRotateCamera(
     "cam",
-    Math.PI/2,
-    Math.PI/2.2,
-    6,                     // ← 最重要：最初から安全距離
-    BABYLON.Vector3.Zero(),
-    scene
+    Math.PI/2, Math.PI/2.2, 2.5,
+    BABYLON.Vector3.Zero(), scene
   );
-  camera.attachControl(canvas, true);
-  camera.lowerRadiusLimit = 4;
-  camera.upperRadiusLimit = 12;
+  cam.attachControl(canvas,true);
 
-  new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
-
-  engine.runRenderLoop(()=> scene.render());
-  window.addEventListener("resize", ()=> engine.resize());
-
-  log("Babylon initialized");
-}
-
-/* ===== LOAD DUCK ===== */
-async function loadDuck(){
-  if (duckLoaded) return;
-  initBabylon();
+  new BABYLON.HemisphericLight("h",new BABYLON.Vector3(0,1,0),scene);
 
   const res = await BABYLON.SceneLoader.ImportMeshAsync(
-    null, "./", GLB_NAME, scene
+    null,"./",GLB,scene
   );
 
-  animGroups = scene.animationGroups || [];
-  duckLoaded = true;
+  anim = scene.animationGroups[0];
+  anim.stop();
 
- 
-    }
-  });
-
-  camera.radius = 8;            // ← カメラが中に入らない
-  camera.target = BABYLON.Vector3.Zero();
-
-  log(`Duck loaded meshes=${res.meshes.length}`);
+  engine.runRenderLoop(()=>scene.render());
 }
 
-/* ===== PLAY / STOP ===== */
-async function play(){
-  if (!cameraReady) return alert("Camera first");
-  await loadDuck();
-  animGroups.forEach(g=>g.start(true));
-  log("Play");
-}
-function stop(){
-  animGroups.forEach(g=>g.stop());
-  log("Stop");
+// ================= ANIMATION CONTROL =================
+function playLock(){
+  if(!anim) return;
+  anim.reset();
+  anim.start(false,0.4,0,15,false);
 }
 
-/* ===== UI ===== */
+function goFrame(f){
+  if(!anim) return;
+  anim.goToFrame(f);
+  anim.pause();
+}
+
+// ================= UI =================
 document.getElementById("btnCamera").onclick = startCamera;
-document.getElementById("btnPlay").onclick = play;
-document.getElementById("btnStop").onclick = stop;
 
-document.getElementById("btnDebug").onclick = ()=>{
-  debugOn = !debugOn;
-  document.getElementById("dbg").style.display = debugOn ? "block":"none";
+document.getElementById("btnLock").onclick = async ()=>{
+  if(!engine) await initBabylon();
+  if(!locked){
+    freezeCamera();
+    locked = true;
+  }
+  playLock();
 };
 
-document.getElementById("btnCopy").onclick = async ()=>{
-  await navigator.clipboard.writeText(logs.join("\n"));
-  alert("Copied");
-};
-
-log("Boot ready");
+document.getElementById("btnFit").onclick = ()=>goFrame(20);
+document.getElementById("btnMini").onclick = ()=>goFrame(10);
 </script>
 </body>
 </html>
