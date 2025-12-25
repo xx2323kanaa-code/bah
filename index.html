@@ -220,6 +220,13 @@ async function loadDuckIfNeeded(){
 
     log("Duck GLB loaded:", GLB_NAME, "meshes:", res.meshes?.length || 0, "animGroups:", animGroups.length);
 
+    // === SCALE FIX (make GLB visible) ===
+scene.meshes.forEach(m => {
+  if (m.name !== "__root__") {
+    m.scaling.set(50, 50, 50);  // 50は目安。小さければ100、大きければ20
+  }
+});
+log(`Scale applied: x50`);
     // 見えやすく：中心寄せ
     // ImportMeshAsync は root が入ることがあるので、全体bboxから軽く調整
     try {
