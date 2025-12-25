@@ -223,7 +223,7 @@ async function loadDuckIfNeeded(){
     // === SCALE FIX (make GLB visible) ===
 scene.meshes.forEach(m => {
   if (m.name !== "__root__") {
-    m.scaling.set(50, 50, 50);  // 50は目安。小さければ100、大きければ20
+    m.scaling.set(12, 12, 12);  // 50は目安。小さければ100、大きければ20
   }
 });
 log(`Scale applied: x50`);
