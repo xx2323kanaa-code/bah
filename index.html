@@ -162,14 +162,11 @@ async function loadDuck(){
   animGroups = scene.animationGroups || [];
   duckLoaded = true;
 
-  scene.meshes.forEach(m=>{
-    if (m.name !== "__root__"){
-      m.scaling.set(3,3,3);      // ← 安定サイズ
-      m.position.set(0,0,0);
+ 
     }
   });
 
-  camera.radius = 6;            // ← カメラが中に入らない
+  camera.radius = 8;            // ← カメラが中に入らない
   camera.target = BABYLON.Vector3.Zero();
 
   log(`Duck loaded meshes=${res.meshes.length}`);
