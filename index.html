@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>Hand Demo – Camera Lock + Frame Control</title>
+<title>Hand Demo – Camera Lock v2</title>
 
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
@@ -13,27 +13,22 @@ html, body {
   margin:0; padding:0; width:100%; height:100%;
   overflow:hidden; background:#000;
 }
-#wrap {
-  position:relative;
-  width:100vw; height:100vh;
-}
+#wrap { position:relative; width:100vw; height:100vh; }
 #video, #snapshot {
-  position:absolute;
-  inset:0;
+  position:absolute; inset:0;
   width:100%; height:100%;
   object-fit:cover;
 }
 #snapshot { display:none; }
 #renderCanvas {
-  position:absolute;
-  inset:0;
+  position:absolute; inset:0;
   width:100%; height:100%;
   pointer-events:none;
 }
 #ui {
   position:fixed;
   left:8px; right:8px; bottom:10px;
-  display:flex; gap:10px; justify-content:space-between;
+  display:flex; justify-content:space-between;
   z-index:10;
 }
 button {
@@ -69,19 +64,30 @@ button {
 const GLB = "animetesthand2.glb";
 
 let engine, scene, cam, anim;
+let meshes = [];
 let cameraOn = false;
 let locked = false;
 
 // ================= CAMERA =================
 async function startCamera(){
-  if(cameraOn) return;
   const video = document.getElementById("video");
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video:{ facingMode:"environment" }, audio:false
-  });
-  video.srcObject = stream;
-  await video.play();
-  cameraOn = true;
+  const snap = document.getElementById("snapshot");
+
+  // リセット
+  locked = false;
+  snap.style.display = "none";
+  video.style.display = "block";
+
+  if(!cameraOn){
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:"environment" }, audio:false
+    });
+    video.srcObject = stream;
+    await video.play();
+    cameraOn = true;
+  }
+
+  setModePreview();
 }
 
 // 静止画取得
@@ -90,14 +96,15 @@ function freezeCamera(){
   const snap = document.getElementById("snapshot");
   snap.width = video.videoWidth;
   snap.height = video.videoHeight;
-  const ctx = snap.getContext("2d");
-  ctx.drawImage(video,0,0);
+  snap.getContext("2d").drawImage(video,0,0);
   snap.style.display = "block";
   video.style.display = "none";
 }
 
 // ================= BABYLON =================
 async function initBabylon(){
+  if(engine) return;
+
   const canvas = document.getElementById("renderCanvas");
   engine = new BABYLON.Engine(canvas,true);
   scene = new BABYLON.Scene(engine);
@@ -108,7 +115,6 @@ async function initBabylon(){
     Math.PI/2, Math.PI/2.2, 2.5,
     BABYLON.Vector3.Zero(), scene
   );
-  cam.attachControl(canvas,true);
 
   new BABYLON.HemisphericLight("h",new BABYLON.Vector3(0,1,0),scene);
 
@@ -116,13 +122,44 @@ async function initBabylon(){
     null,"./",GLB,scene
   );
 
+  meshes = res.meshes.filter(m => m.name !== "__root__");
   anim = scene.animationGroups[0];
   anim.stop();
 
   engine.runRenderLoop(()=>scene.render());
 }
 
-// ================= ANIMATION CONTROL =================
+// ================= MODES =================
+function setModePreview(){
+  if(!meshes.length) return;
+
+  anim.stop();
+
+  meshes.forEach(m=>{
+    m.setEnabled(true);
+    m.scaling.set(0.6,0.6,0.6);
+    m.position.set(-0.9,-0.6,0);
+  });
+
+  cam.radius = 3.5;
+  cam.target.set(-0.9,-0.6,0);
+
+  anim.goToFrame(0);
+  anim.pause();
+}
+
+function setModeLocked(){
+  meshes.forEach(m=>{
+    m.setEnabled(true);
+    m.scaling.set(1.2,1.2,1.2);
+    m.position.set(0,0,0);
+  });
+
+  cam.radius = 2.4;
+  cam.target.set(0,0,0);
+}
+
+// ================= ANIMATION =================
 function playLock(){
   if(!anim) return;
   anim.reset();
@@ -139,9 +176,10 @@ function goFrame(f){
 document.getElementById("btnCamera").onclick = startCamera;
 
 document.getElementById("btnLock").onclick = async ()=>{
-  if(!engine) await initBabylon();
+  await initBabylon();
   if(!locked){
     freezeCamera();
+    setModeLocked();
     locked = true;
   }
   playLock();
