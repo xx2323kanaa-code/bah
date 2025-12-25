@@ -3,65 +3,59 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>Camera + Duck Overlay (Safe Full Version)</title>
+<title>Camera + Duck Overlay Test (Play/Stop + HUD + LogCopy)</title>
 
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 
 <style>
-html, body {
-  margin:0; padding:0;
-  width:100%; height:100%;
-  overflow:hidden;
-  background:#000;
-}
-#wrap {
-  position:relative;
-  width:100vw; height:100vh;
-}
-#video {
-  position:absolute; inset:0;
-  width:100%; height:100%;
-  object-fit:cover;
-  background:#000;
-  z-index:0;
-}
-#renderCanvas {
-  position:absolute; inset:0;
-  width:100%; height:100%;
-  z-index:1;
-  touch-action:none;
-}
-#hudBar {
-  position:fixed;
-  left:8px; right:8px; bottom:10px;
-  z-index:5;
-  display:flex;
-  justify-content:space-between;
-  gap:10px;
-}
-.btn {
-  padding:10px 12px;
-  font-size:14px;
-  border-radius:10px;
-  border:1px solid rgba(255,255,255,0.3);
-  background:rgba(0,0,0,0.6);
-  color:#fff;
-}
-#dbg {
-  position:fixed;
-  left:8px; top:8px; right:8px;
-  z-index:6;
-  max-height:45vh;
-  overflow:auto;
-  padding:10px;
-  font:12px/1.4 monospace;
-  color:#0f0;
-  background:rgba(0,0,0,0.65);
-  border-radius:10px;
-  display:none;
-  white-space:pre-wrap;
-}
+  html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+  #wrap { position:relative; width:100vw; height:100vh; background:#000; }
+  #video {
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    object-fit:cover;
+    background:#000;
+    z-index:0;
+  }
+  #renderCanvas {
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    z-index:1;
+    touch-action:none;
+    background:transparent;
+  }
+  #hudBar {
+    position:fixed; left:8px; right:8px; bottom:10px;
+    z-index:5;
+    display:flex; gap:10px; align-items:center; justify-content:space-between;
+    pointer-events:auto;
+  }
+  .btn {
+    font-size:14px; padding:10px 12px; border-radius:10px;
+    border:1px solid rgba(255,255,255,0.25);
+    background:rgba(0,0,0,0.55); color:#fff;
+  }
+  .btn:active { transform:scale(0.98); }
+  #dbg {
+    position:fixed; left:8px; top:8px; right:8px;
+    z-index:6;
+    padding:10px;
+    font:12px/1.35 ui-monospace, monospace;
+    color:#0f0;
+    background:rgba(0,0,0,0.6);
+    border-radius:12px;
+    display:none;
+    max-height:45vh;
+    overflow:auto;
+    white-space:pre-wrap;
+  }
+  #toast {
+    position:fixed; left:50%; bottom:70px; transform:translateX(-50%);
+    z-index:7; padding:8px 10px; border-radius:10px;
+    background:rgba(0,0,0,0.7); color:#fff; font-size:13px;
+    display:none;
+  }
 </style>
 </head>
 
@@ -71,6 +65,7 @@ html, body {
   <canvas id="renderCanvas"></canvas>
 
   <div id="dbg"></div>
+  <div id="toast"></div>
 
   <div id="hudBar">
     <div>
@@ -79,127 +74,145 @@ html, body {
       <button class="btn" id="btnStop">Stop</button>
     </div>
     <div>
-      <button class="btn" id="btnDebug">HUD</button>
+      <button class="btn" id="btnDebug">HUD Debug</button>
+      <button class="btn" id="btnCopy">Log Copy</button>
     </div>
   </div>
 </div>
 
 <script>
-/* ========= CONFIG ========= */
 const GLB_NAME = "Duck1.glb";
+const LOG_MAX = 400;
 
-/* ========= STATE ========= */
-let engine, scene, camera;
-let animGroups = [];
-let duckLoaded = false;
-let cameraReady = false;
-let debugOn = false;
+let engine=null, scene=null;
+let duckLoaded=false, animGroups=[];
+let logBuf=[], debugOn=false;
+let cameraReady=false;
 
-/* ========= LOG ========= */
-const logBuf = [];
-function log(msg){
-  const line = `[${new Date().toISOString()}] ${msg}`;
+function log(...args){
+  const line = `[${new Date().toISOString()}] ${args.join(" ")}`;
   logBuf.push(line);
-  if (logBuf.length > 200) logBuf.shift();
+  if (logBuf.length > LOG_MAX) logBuf.shift();
+  if (debugOn) renderDebug();
   console.log(line);
-  if (debugOn) {
-    document.getElementById("dbg").textContent = logBuf.join("\n");
-  }
+}
+function toast(s){
+  const t=document.getElementById("toast");
+  t.textContent=s; t.style.display="block";
+  setTimeout(()=>t.style.display="none",1200);
+}
+function renderDebug(){
+  const d=document.getElementById("dbg");
+  d.textContent =
+`cameraReady: ${cameraReady}
+duckLoaded:  ${duckLoaded}
+animGroups:  ${animGroups.length}
+
+${logBuf.slice(-20).join("\n")}`;
 }
 
-/* ========= CAMERA ========= */
+/* ===== CAMERA ===== */
 async function startCamera(){
   if (cameraReady) return;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:"environment" }, audio:false
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:"environment"}, audio:false
     });
-    const video = document.getElementById("video");
-    video.srcObject = stream;
-    await video.play();
-    cameraReady = true;
+    const v=document.getElementById("video");
+    v.srcObject=stream;
+    await v.play();
+    cameraReady=true;
     log("Camera started");
-  } catch(e){
+  }catch(e){
     alert("Camera failed");
   }
 }
 
-/* ========= BABYLON ========= */
-function initBabylon(){
+/* ===== BABYLON ===== */
+async function initBabylonIfNeeded(){
   if (engine) return;
 
-  const canvas = document.getElementById("renderCanvas");
-  engine = new BABYLON.Engine(canvas, true);
-  scene  = new BABYLON.Scene(engine);
+  const canvas=document.getElementById("renderCanvas");
+  engine=new BABYLON.Engine(canvas,true);
+  scene=new BABYLON.Scene(engine);
 
-  /* ★ デバッグ中は必ず見える背景 */
-  scene.clearColor = new BABYLON.Color4(0.2,0.2,0.2,1);
+  scene.clearColor=new BABYLON.Color4(0,0,0,0);
 
-  camera = new BABYLON.ArcRotateCamera(
-    "cam",
-    Math.PI/2,
-    Math.PI/2.2,
-    8,
-    BABYLON.Vector3.Zero(),
-    scene
+  const cam=new BABYLON.ArcRotateCamera(
+    "cam", Math.PI/2, Math.PI/2.2, 6,
+    BABYLON.Vector3.Zero(), scene
   );
-  camera.minZ = 0.01;
-  camera.maxZ = 1000;
-  camera.attachControl(canvas, true);
 
-  new BABYLON.HemisphericLight("l", new BABYLON.Vector3(0,1,0), scene);
+  /* ★ 核心①：必ず原点を見る */
+  cam.setTarget(BABYLON.Vector3.Zero());
 
-  engine.runRenderLoop(()=> scene.render());
-  window.addEventListener("resize", ()=> engine.resize());
+  cam.minZ=0.01;
+  cam.maxZ=1000;
+  cam.attachControl(canvas,true);
+
+  new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+
+  engine.runRenderLoop(()=>scene.render());
+  window.addEventListener("resize",()=>engine.resize());
 
   log("Babylon initialized");
 }
 
-/* ========= LOAD GLB ========= */
-async function loadDuck(){
+/* ===== LOAD ===== */
+async function loadDuckIfNeeded(){
   if (duckLoaded) return;
-  initBabylon();
+  await initBabylonIfNeeded();
 
-  const res = await BABYLON.SceneLoader.ImportMeshAsync(
-    null, "./", GLB_NAME, scene
+  const res=await BABYLON.SceneLoader.ImportMeshAsync(
+    null,"./",GLB_NAME,scene
   );
 
-  animGroups = scene.animationGroups || [];
-  duckLoaded = true;
+  animGroups=scene.animationGroups||[];
+  duckLoaded=true;
 
-  /* ★ スケールは小さめ＋カメラで調整 */
+  /* ★ 核心②：スケールは控えめ */
   scene.meshes.forEach(m=>{
-    if (m.name !== "__root__") {
-      m.scaling.set(3,3,3);
-    }
+    if(m.name!=="__root__") m.scaling.set(3,3,3);
   });
 
-  log(`GLB loaded: meshes=${res.meshes.length}, anim=${animGroups.length}`);
+  /* ★ 核心③：BBox中心を原点へ */
+  try{
+    const meshes=res.meshes.filter(m=>m.getTotalVertices?.()>0);
+    if(meshes.length){
+      const bb=meshes[0].getHierarchyBoundingVectors(true);
+      const center=bb.min.add(bb.max).scale(0.5);
+      meshes.forEach(m=>m.position.subtractInPlace(center));
+    }
+  }catch(e){}
+
+  log("Duck loaded meshes="+res.meshes.length);
 }
 
-/* ========= PLAY / STOP ========= */
+/* ===== PLAY / STOP ===== */
 async function playDuck(){
-  if (!cameraReady){
-    alert("Start Camera first");
-    return;
-  }
-  await loadDuck();
-  animGroups.forEach(g=> g.start(true));
+  if(!cameraReady){toast("Start Camera first");return;}
+  await loadDuckIfNeeded();
+  animGroups.forEach(g=>g.start(true));
   log("Play");
 }
 function stopDuck(){
-  animGroups.forEach(g=> g.stop());
+  animGroups.forEach(g=>g.stop());
   log("Stop");
 }
 
-/* ========= UI ========= */
-document.getElementById("btnCamera").onclick = startCamera;
-document.getElementById("btnPlay").onclick   = playDuck;
-document.getElementById("btnStop").onclick   = stopDuck;
-document.getElementById("btnDebug").onclick  = ()=>{
-  debugOn = !debugOn;
-  document.getElementById("dbg").style.display = debugOn?"block":"none";
+/* ===== UI ===== */
+document.getElementById("btnCamera").onclick=startCamera;
+document.getElementById("btnPlay").onclick=playDuck;
+document.getElementById("btnStop").onclick=stopDuck;
+document.getElementById("btnDebug").onclick=()=>{
+  debugOn=!debugOn;
+  document.getElementById("dbg").style.display=debugOn?"block":"none";
 };
+document.getElementById("btnCopy").onclick=()=>{
+  navigator.clipboard.writeText(logBuf.join("\n"));
+  toast("Copied");
+};
+
 log("Boot ready");
 </script>
 </body>
